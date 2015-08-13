@@ -1010,46 +1010,73 @@ namespace ICSharpCode.Decompiler.ILAst
 		{
 			ILExpression left = expr.Arguments[0];
 			ILExpression right = expr.Arguments[1];
+
 			TypeReference leftPreferred = DoInferTypeForExpression(left, expectedType);
-			if (leftPreferred is PointerType) {
-				left.InferredType = left.ExpectedType = leftPreferred;
-				InferTypeForExpression(right, null);
+			if (leftPreferred is PointerType || leftPreferred is ByReferenceType)
+			{
+				left.InferredType = left.ExpectedType = new PointerType(leftPreferred.GetElementType());
+				TypeReference rightInferred = InferTypeForExpression(right, null);
+
+				// Set the expected type to trigger casts.
+				if (right.ExpectedType == null)
+					right.ExpectedType = rightInferred;
+
 				return leftPreferred;
 			}
+
 			if (IsEnum(leftPreferred)) {
 				//E+U=E
 				left.InferredType = left.ExpectedType = leftPreferred;
 				InferTypeForExpression(right, GetEnumUnderlyingType(leftPreferred));
 				return leftPreferred;
 			}
+
 			TypeReference rightPreferred = DoInferTypeForExpression(right, expectedType);
 			if (rightPreferred is PointerType) {
 				InferTypeForExpression(left, null);
 				right.InferredType = right.ExpectedType = rightPreferred;
 				return rightPreferred;
 			}
+
 			if (IsEnum(rightPreferred)) {
 				//U+E=E
 				right.InferredType = right.ExpectedType = rightPreferred;
 				InferTypeForExpression(left, GetEnumUnderlyingType(rightPreferred));
 				return rightPreferred;
 			}
+
+			// Handle the normal cases.
 			return InferBinaryArguments(left, right, expectedType, leftPreferred: leftPreferred, rightPreferred: rightPreferred);
 		}
-		
+
 		TypeReference InferArgumentsInSubtraction(ILExpression expr, bool? isSigned, TypeReference expectedType)
 		{
 			ILExpression left = expr.Arguments[0];
 			ILExpression right = expr.Arguments[1];
+
 			TypeReference leftPreferred = DoInferTypeForExpression(left, expectedType);
-			if (leftPreferred is PointerType) {
-				left.InferredType = left.ExpectedType = leftPreferred;
-				TypeReference rightPreferred = InferTypeForExpression(right, null);
-				// subtracting two pointers is not a pointer
-				if (rightPreferred is PointerType)
-					return typeSystem.IntPtr;
+			if (leftPreferred is PointerType || leftPreferred is ByReferenceType)
+			{
+				left.InferredType = left.ExpectedType = new PointerType(leftPreferred.GetElementType());
+				TypeReference rightInferred = InferTypeForExpression(right, null);
+
+				// Set the expected type to trigger casts.
+				if (right.ExpectedType == null)
+				{
+					// If the right is a pointer it must match the left pointer.
+					if (rightInferred is PointerType || rightInferred is ByReferenceType)
+						right.ExpectedType = leftPreferred;
+					else
+						right.ExpectedType = rightInferred;
+				}
+
+				// Subtracting two pointers results in a long.
+				if (rightInferred is PointerType || rightInferred is ByReferenceType)
+					return typeSystem.Int64;
+
 				return leftPreferred;
 			}
+
 			if (IsEnum(leftPreferred)) {
 				if (expectedType != null && IsEnum(expectedType)) {
 					// E-U=E
@@ -1063,6 +1090,8 @@ namespace ICSharpCode.Decompiler.ILAst
 					return GetEnumUnderlyingType(leftPreferred);
 				}
 			}
+
+			// Handle the normal cases.
 			return InferBinaryArguments(left, right, expectedType, leftPreferred: leftPreferred);
 		}
 
@@ -1176,7 +1205,7 @@ namespace ICSharpCode.Decompiler.ILAst
 			return typeDef != null && typeDef.IsEnum;
 		}
 		
-		static bool? IsSigned(TypeReference type)
+		public static bool? IsSigned(TypeReference type)
 		{
 			type = GetEnumUnderlyingType(type) ?? type;
 			if (type == null)

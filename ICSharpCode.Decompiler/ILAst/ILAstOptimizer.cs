@@ -694,12 +694,17 @@ namespace ICSharpCode.Decompiler.ILAst
 					{
 						ILExpression arg0 = args[0];
 						ILExpression arg1 = args[1];
-						if (expr.InferredType is PointerType) {
-							if (arg0.ExpectedType is PointerType) {
-								DivideOrMultiplyBySize(ref arg0, ref arg1, ((PointerType)expr.InferredType).ElementType, true);
-							} else if (arg1.ExpectedType is PointerType)
-								DivideOrMultiplyBySize(ref arg1, ref arg0, ((PointerType)expr.InferredType).ElementType, true);
+
+						if (expr.InferredType is PointerType || expr.InferredType is ByReferenceType) 
+                        {
+                            var elementType = expr.InferredType.GetElementType();
+
+                            if (arg0.ExpectedType is PointerType || arg0.ExpectedType is ByReferenceType)
+                                DivideOrMultiplyBySize(ref arg0, ref arg1, elementType, true);
+							else if (arg1.ExpectedType is PointerType)
+                                DivideOrMultiplyBySize(ref arg1, ref arg0, elementType, true);
 						}
+
 						args[0] = arg0;
 						args[1] = arg1;
 						break;
@@ -714,6 +719,7 @@ namespace ICSharpCode.Decompiler.ILAst
 							if (arg0.ExpectedType is PointerType && !(arg1.InferredType is PointerType))
 								DivideOrMultiplyBySize(ref arg0, ref arg1, ((PointerType)expr.InferredType).ElementType, true);
 						}
+
 						args[0] = arg0;
 						args[1] = arg1;
 						break;
@@ -722,13 +728,18 @@ namespace ICSharpCode.Decompiler.ILAst
 					{
 						ILExpression arg0 = args[0];
 						// conv.i8(div:intptr(p0 - p1))
-						if (arg0.Code == ILCode.Div && arg0.InferredType.FullName == "System.IntPtr")
+						if (arg0.Code == ILCode.Div && arg0.InferredType.FullName == "System.Int64")
 						{
 							ILExpression dividend = arg0.Arguments[0];
-							if (dividend.InferredType.FullName == "System.IntPtr" &&
+                            if (dividend.InferredType.FullName == "System.Int64" &&
 								(dividend.Code == ILCode.Sub || dividend.Code == ILCode.Sub_Ovf || dividend.Code == ILCode.Sub_Ovf_Un))
 							{
 								PointerType pointerType0 = dividend.Arguments[0].InferredType as PointerType;
+
+                                // If the second argument is a reference then convert it to a pointer.
+                                if (pointerType0 != null && dividend.Arguments[1].InferredType is ByReferenceType)
+                                    dividend.Arguments[1].InferredType = new PointerType(dividend.Arguments[1].InferredType.GetElementType());
+
 								PointerType pointerType1 = dividend.Arguments[1].InferredType as PointerType;
 
 								if (pointerType0 != null && pointerType1 != null) {
@@ -783,6 +794,34 @@ namespace ICSharpCode.Decompiler.ILAst
 			};
 		}
 
+        public ILExpression BalanceCast(ILExpression pointerExpr, TypeReference elementType, int mulArgOperand)
+        {
+            var isSigned = TypeAnalysis.IsSigned(elementType);
+            if (!isSigned.HasValue)
+                return pointerExpr;
+
+            TypeReference pointerSize;
+            switch (mulArgOperand)
+            {
+                case 2:
+                    pointerSize = isSigned.Value ? typeSystem.Int16 : typeSystem.UInt16;
+                    break;
+
+                case 4:
+                    pointerSize = isSigned.Value ? typeSystem.Int32 : typeSystem.UInt32;
+                    break;
+
+                case 8:
+                    pointerSize = isSigned.Value ? typeSystem.Int64 : typeSystem.UInt64;
+                    break;
+
+                default:
+                    return pointerExpr;
+            }
+
+            return Cast(pointerExpr, new PointerType(pointerSize));
+        }
+
 		void DivideOrMultiplyBySize(ref ILExpression pointerExpr, ref ILExpression adjustmentExpr, TypeReference elementType, bool divide)
 		{
 			adjustmentExpr = UnwrapIntPtrCast(adjustmentExpr);
@@ -811,15 +850,52 @@ namespace ICSharpCode.Decompiler.ILAst
 			}
 
 			if (divide && (adjustmentExpr.Code == ILCode.Mul || adjustmentExpr.Code == ILCode.Mul_Ovf || adjustmentExpr.Code == ILCode.Mul_Ovf_Un) ||
-				!divide && (adjustmentExpr.Code == ILCode.Div || adjustmentExpr.Code == ILCode.Div_Un)) {
-				ILExpression mulArg = adjustmentExpr.Arguments[1];
-				if (mulArg.Code == sizeOfExpression.Code && sizeOfExpression.Operand.Equals(mulArg.Operand)) {
-					adjustmentExpr = UnwrapIntPtrCast(adjustmentExpr.Arguments[0]);
-					return;
+				!divide && (adjustmentExpr.Code == ILCode.Div || adjustmentExpr.Code == ILCode.Div_Un))                {
+				
+                // Get the right side argument of the pointer divide/multiply.
+                ILExpression mulArg = adjustmentExpr.Arguments[1];
+
+                // Peel of any extra conversion calls.
+                while (mulArg.Code >= ILCode.Conv_I1 && mulArg.Code <= ILCode.Conv_U8)
+                    mulArg = mulArg.Arguments[0];
+
+				if (mulArg.Code == sizeOfExpression.Code)
+                {
+                    // If the types are equal then remove the multiply.
+                    if (mulArg.Operand.Equals(sizeOfExpression.Operand))
+                    {
+                        adjustmentExpr = UnwrapIntPtrCast(adjustmentExpr.Arguments[0]);
+                        return;
+                    }
+                    
+                    var mulArgOperand = (int)mulArg.Operand;
+                    var sizeOfOperand = (int)sizeOfExpression.Operand;
+
+                    if (sizeOfOperand >= mulArgOperand && (sizeOfOperand % mulArgOperand) == 0)
+                    {
+                        adjustmentExpr = UnwrapIntPtrCast(adjustmentExpr.Arguments[0]);
+
+                        if (sizeOfOperand != mulArgOperand)
+                            pointerExpr = BalanceCast(pointerExpr, elementType, mulArgOperand);
+
+                        return;
+                    }
 				}
+                else if (mulArg.Code == ILCode.Sizeof)
+                {
+                    pointerExpr = Cast(pointerExpr, new PointerType((TypeReference)mulArg.Operand));
+                    adjustmentExpr = adjustmentExpr.Arguments[0];
+                    return;
+                }
+                else
+                {
+                    pointerExpr = Cast(pointerExpr, new PointerType(typeSystem.Byte));
+                    return;
+                }
 			}
 
 			if (adjustmentExpr.Code == sizeOfExpression.Code) {
+
 				if (sizeOfExpression.Operand.Equals(adjustmentExpr.Operand)) {
 					adjustmentExpr = new ILExpression(ILCode.Ldc_I4, 1);
 					return;
@@ -839,7 +915,13 @@ namespace ICSharpCode.Decompiler.ILAst
 				}
 			}
 
-			if (!(sizeOfExpression.Code == ILCode.Ldc_I4 && (int)sizeOfExpression.Operand == 1))
+            if (pointerExpr.InferredType.GetElementType() != elementType && elementType.FullName != "System.Void")
+		    {
+		        pointerExpr = Cast(pointerExpr, new PointerType(elementType));
+		        return;
+		    }
+
+		    if (!(sizeOfExpression.Code == ILCode.Ldc_I4 && (int)sizeOfExpression.Operand == 1))
 				adjustmentExpr = new ILExpression(divide ? ILCode.Div_Un : ILCode.Mul, null, adjustmentExpr, sizeOfExpression);
 		}
 		

@@ -17,6 +17,7 @@
 // DEALINGS IN THE SOFTWARE.
 
 using System;
+using System.Runtime.InteropServices;
 
 public class UnsafeCode
 {
@@ -133,6 +134,71 @@ public class UnsafeCode
 		return (byte*)((short*)p + (y * x));
 	}
 
+    public unsafe byte* PointerArithmetic2Int(long* p, int y, int x)
+    {
+        return (byte*)((int*)p + (y * x));
+    }
+
+    public unsafe byte* PointerArithmetic2Long(long* p, int y, int x)
+    {
+        return (byte*)(p + (y * x));
+    }
+
+    public unsafe byte* PointerArithmetic2Byte(long* p, int y, int x)
+    {
+        return ((byte*)p + (y * x));
+    }
+
+    public unsafe byte* PointerArithmetic2SubtractShort(long* p, int y, int x)
+    {
+        return (byte*)((short*)p - (y * x));
+    }
+
+    public unsafe byte* PointerArithmetic2SubtractInt(long* p, int y, int x)
+    {
+        return (byte*)((int*)p - (y * x));
+    }
+
+    public unsafe byte* PointerArithmetic2SubtractLong(long* p, int y, int x)
+    {
+        return (byte*)(p - (y * x));
+    }
+
+    public unsafe byte* PointerArithmetic2SubtractByte(long* p, int y, int x)
+    {
+        return ((byte*)p - (y * x));
+    }
+
+    public unsafe void PointerIncrement(char* one, char* two, int times)
+    {
+        for (var i = 0; i < times; i++)
+        {
+            one--;
+            two++;
+            *(one++) = *(++two);
+            --one;
+            ++two;
+            *(two--) = *(--one);
+        }
+    }
+
+    struct Misc
+    {
+        public long one;
+        public float two;
+        public double three;
+    }
+
+    public unsafe byte* PointerArithmetic2Struct(long* p, int y, int x)
+    {
+        return (byte*)((Misc*)p + (y * x));
+    }
+
+    public unsafe byte* PointerArithmetic2SubtractStruct(long* p, int y, int x)
+    {
+        return (byte*)((Misc*)p - (y * x));
+    }
+
 	public unsafe long* PointerArithmetic3(long* p)
 	{
 		return (long*)((byte*)p + 3);
@@ -162,6 +228,22 @@ public class UnsafeCode
 	{
 		return (int)((long)((byte*)p - (byte*)q));
 	}
+
+    public unsafe char* PointerStringAdd(string str, int offset)
+    {
+        fixed (char* chrs = str + offset)
+        {
+            return chrs + offset;
+        }
+    }
+
+    public unsafe char PointerStringIndex(string str, int start, int offset)
+    {
+        fixed (char* chrs = str + (start * 2))
+        {
+            return chrs[offset - 1];
+        }
+    }
 
 	unsafe ~UnsafeCode()
 	{
