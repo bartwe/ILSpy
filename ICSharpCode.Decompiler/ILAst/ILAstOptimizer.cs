@@ -127,7 +127,7 @@ namespace ICSharpCode.Decompiler.ILAst
 			TypeAnalysis.Run(context, method);
 			
 			if (abortBeforeStep == ILAstOptimizationStep.HandlePointerArithmetic) return;
-			HandlePointerArithmetic(method);
+			//HandlePointerArithmetic(method);
 
 			foreach(ILBlock block in method.GetSelfAndChildrenRecursive<ILBlock>()) {
 				bool modified;
