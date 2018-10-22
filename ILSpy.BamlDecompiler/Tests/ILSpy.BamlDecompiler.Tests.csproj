@@ -112,10 +112,6 @@
       <Project>{DDE2A481-8271-4EAC-A330-8FA6A38D13D1}</Project>
       <Name>ICSharpCode.TreeView</Name>
     </ProjectReference>
-    <ProjectReference Include="..\ILSpy.BamlDecompiler.csproj">
-      <Project>{A6BAD2BA-76BA-461C-8B6D-418607591247}</Project>
-      <Name>ILSpy.BamlDecompiler</Name>
-    </ProjectReference>
   </ItemGroup>
   <ItemGroup />
   <ItemGroup>
